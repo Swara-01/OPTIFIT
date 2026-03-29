@@ -8,33 +8,90 @@ import {
     Modal,
     TextInput,
     Alert,
+    Dimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { Pedometer } from "expo-sensors";
+import { AnimatedCircularProgress } from "react-native-circular-progress";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { LineChart } from "react-native-chart-kit";
+
+const screenWidth = Dimensions.get("window").width;
+const cardWidth = screenWidth - 40;
 
 export default function StepsScreen() {
     const [steps, setSteps] = useState(0);
-    const [goal, setGoal] = useState(0);
-
-    const [isPedometerAvailable, setIsPedometerAvailable] = useState("checking");
-    const [liveSteps, setLiveSteps] = useState(0);
-
+    const [goal, setGoal] = useState(10000);
     const [goalModalVisible, setGoalModalVisible] = useState(false);
-    const [stepsModalVisible, setStepsModalVisible] = useState(false);
-
     const [goalInput, setGoalInput] = useState("");
-    const [stepsInput, setStepsInput] = useState("");
+    const [weeklyData, setWeeklyData] = useState([0, 0, 0, 0, 0, 0, 0]);
 
-    const progress = goal > 0 ? Math.min((steps / goal) * 100, 100).toFixed(0) : 0;
+    const progress = goal > 0 ? Math.min((steps / goal) * 100, 100) : 0;
     const calories = Math.floor(steps * 0.04);
     const distance = (steps * 0.0008).toFixed(2);
     const activeMinutes = Math.floor(steps / 100);
-
     const stepsLeft = goal > 0 ? Math.max(goal - steps, 0) : 0;
+    const goalReached = steps >= goal;
+
+    const getStatusMessage = () => {
+        if (goalReached) return "Amazing! You completed your goal today.";
+        if (progress >= 80) return "You are very close. Keep going!";
+        if (progress >= 50) return "Great progress. Stay active!";
+        return "Start moving to reach your daily target.";
+    };
+
+    const getTodayKey = () => {
+        const today = new Date();
+        return today.toISOString().split("T")[0];
+    };
+
+    const getLast7DaysKeys = () => {
+        const days = [];
+        for (let i = 6; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            days.push(d.toISOString().split("T")[0]);
+        }
+        return days;
+    };
+
+    const getLast7DaysLabels = () => {
+        const days = [];
+        for (let i = 6; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            days.push(d.toLocaleDateString("en-US", { weekday: "short" }).slice(0, 3));
+        }
+        return days;
+    };
+
+    const saveTodaySteps = async (stepValue) => {
+        try {
+            const key = `steps-${getTodayKey()}`;
+            await AsyncStorage.setItem(key, String(stepValue));
+        } catch (error) {
+            console.log("Save steps error:", error);
+        }
+    };
+
+    const loadWeeklyData = async () => {
+        try {
+            const keys = getLast7DaysKeys();
+            const values = await Promise.all(
+                keys.map(async (key) => {
+                    const value = await AsyncStorage.getItem(`steps-${key}`);
+                    return value ? Number(value) : 0;
+                })
+            );
+            setWeeklyData(values);
+        } catch (error) {
+            console.log("Load weekly data error:", error);
+        }
+    };
 
     const handleSetGoal = () => {
-        const newGoal = parseInt(goalInput);
+        const newGoal = parseInt(goalInput, 10);
 
         if (!newGoal || newGoal <= 0) {
             Alert.alert("Invalid Goal", "Please enter a valid step goal.");
@@ -46,52 +103,50 @@ export default function StepsScreen() {
         setGoalModalVisible(false);
     };
 
-    const handleAddSteps = () => {
-        const newSteps = parseInt(stepsInput);
-
-        if (!newSteps || newSteps <= 0) {
-            Alert.alert("Invalid Steps", "Please enter valid steps.");
-            return;
-        }
-
-        setSteps((prev) => prev + newSteps);
-        setStepsInput("");
-        setStepsModalVisible(false);
-    };
-
     const handleReset = () => {
         Alert.alert("Reset Data", "Do you want to reset today's steps?", [
             { text: "Cancel", style: "cancel" },
             {
                 text: "Reset",
                 style: "destructive",
-                onPress: () => {
+                onPress: async () => {
                     setSteps(0);
+                    await saveTodaySteps(0);
+                    await loadWeeklyData();
                 },
             },
         ]);
     };
 
     useEffect(() => {
-        console.log("useEffect started");
-
         let subscription;
+        let baseSteps = 0;
 
         const subscribe = async () => {
-            console.log("subscribe function started");
+            try {
+                const available = await Pedometer.isAvailableAsync();
+                if (!available) return;
 
-            const available = await Pedometer.isAvailableAsync();
-            console.log("Pedometer available:", available);
+                const end = new Date();
+                const start = new Date();
+                start.setHours(0, 0, 0, 0);
 
-            setIsPedometerAvailable(String(available));
+                const todayResult = await Pedometer.getStepCountAsync(start, end);
+                baseSteps = todayResult.steps || 0;
 
-            if (!available) return;
+                setSteps(baseSteps);
+                await saveTodaySteps(baseSteps);
+                await loadWeeklyData();
 
-            subscription = Pedometer.watchStepCount(result => {
-                console.log("Live steps:", result.steps);
-                setLiveSteps(result.steps);
-                setSteps(result.steps);
-            });
+                subscription = Pedometer.watchStepCount(async (result) => {
+                    const updatedSteps = baseSteps + result.steps;
+                    setSteps(updatedSteps);
+                    await saveTodaySteps(updatedSteps);
+                    await loadWeeklyData();
+                });
+            } catch (error) {
+                console.log("Pedometer error:", error);
+            }
         };
 
         subscribe();
@@ -105,71 +160,156 @@ export default function StepsScreen() {
         <SafeAreaView style={styles.container}>
             <ScrollView showsVerticalScrollIndicator={false}>
                 <View style={styles.headerRow}>
-                    <Text style={styles.header}>Steps Tracker</Text>
+                    <View>
+                        <Text style={styles.header}>Steps Tracker</Text>
+                        <Text style={styles.subHeader}>Move more, feel better</Text>
+                    </View>
 
                     <TouchableOpacity
                         style={styles.goalButton}
                         onPress={() => setGoalModalVisible(true)}
                     >
-                        <Text style={styles.goalButtonText}>
-                            {goal > 0 ? "Edit Goal" : "Set Goal"}
-                        </Text>
+                        <Text style={styles.goalButtonText}>Edit Goal</Text>
                     </TouchableOpacity>
                 </View>
 
                 <View style={styles.bigCard}>
-                    <View style={styles.circleOuter}>
-                        <View style={styles.circleInner}>
-                            <Ionicons name="walk" size={30} color="#00E676" />
-                            <Text style={styles.stepsText}>{steps}</Text>
-                            <Text style={styles.stepsSubText}>steps today</Text>
+                    <AnimatedCircularProgress
+                        size={190}
+                        width={14}
+                        fill={progress}
+                        tintColor="#00E676"
+                        backgroundColor="#243654"
+                        rotation={0}
+                        lineCap="round"
+                    >
+                        {() => (
+                            <View style={styles.circleInner}>
+                                <Ionicons name="walk" size={28} color="#00E676" />
+                                <Text style={styles.stepsText}>{steps}</Text>
+                                <Text style={styles.stepsSubText}>steps today</Text>
+                            </View>
+                        )}
+                    </AnimatedCircularProgress>
+
+                    <Text style={styles.progressText}>{progress.toFixed(0)}% completed</Text>
+                    <Text style={styles.goalText}>Goal: {goal} steps</Text>
+
+                    <View style={styles.chipsRow}>
+                        <View style={styles.premiumChip}>
+                            <Ionicons
+                                name={goalReached ? "checkmark-circle" : "flag-outline"}
+                                size={16}
+                                color="#00E676"
+                            />
+                            <Text style={styles.premiumChipText}>
+                                {goalReached ? "Goal reached" : `${stepsLeft} left`}
+                            </Text>
                         </View>
-                    </View>
 
-                    <Text style={styles.progressText}>
-                        {goal > 0 ? `${progress}% of your daily goal` : "No goal set yet"}
-                    </Text>
-
-                    <Text style={styles.goalText}>
-                        {goal > 0 ? `Goal: ${goal} steps` : "Tap Set Goal to begin"}
-                    </Text>
-
-                    <View style={styles.progressBarBg}>
-                        <View style={[styles.progressBarFill, { width: `${progress}%` }]} />
-                    </View>
-
-                    <View style={styles.actionButtonsRow}>
-                        <TouchableOpacity style={styles.resetButton} onPress={handleReset}>
-                            <Text style={styles.resetButtonText}>Reset</Text>
-                        </TouchableOpacity>
+                        <View style={styles.premiumChip}>
+                            <Ionicons name="flash-outline" size={16} color="#38BDF8" />
+                            <Text style={styles.premiumChipText}>{activeMinutes} active min</Text>
+                        </View>
                     </View>
                 </View>
 
-                <Text style={styles.sectionTitle}>Today’s Activity</Text>
+                <ScrollView
+                    horizontal
+                    pagingEnabled
+                    showsHorizontalScrollIndicator={false}
+                    decelerationRate="fast"
+                    snapToInterval={cardWidth}
+                    snapToAlignment="start"
+                    contentContainerStyle={styles.swipeCardsContainer}
+                    style={styles.swipeWrapper}
+                >
+                    <View style={[styles.swipeCard, { width: cardWidth }]}>
+                        <View style={styles.statusTopRow}>
+                            <Text style={styles.statusTitle}>Daily Status</Text>
+                            <Text style={styles.statusPercent}>{progress.toFixed(0)}%</Text>
+                        </View>
+
+                        <Text style={styles.statusMessage}>{getStatusMessage()}</Text>
+
+                        <Text style={styles.statusSub}>
+                            {goalReached
+                                ? "You did a great job today."
+                                : `${stepsLeft} more steps needed to complete your target.`}
+                        </Text>
+
+                        <Text style={styles.swipeHint}>Swipe left for weekly steps →</Text>
+                    </View>
+
+                    <View style={[styles.swipeCard, { width: cardWidth }]}>
+                        <View style={styles.weeklyHeader}>
+                            <Text style={styles.weeklyTitle}>Weekly Steps</Text>
+                            <TouchableOpacity style={styles.resetMiniBtn} onPress={handleReset}>
+                                <Text style={styles.resetMiniText}>Reset</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        <LineChart
+                            data={{
+                                labels: getLast7DaysLabels(),
+                                datasets: [{ data: weeklyData }],
+                            }}
+                            width={cardWidth - 24}
+                            height={160}
+                            withDots={true}
+                            withInnerLines={false}
+                            withOuterLines={false}
+                            withVerticalLines={false}
+                            withHorizontalLines={true}
+                            fromZero={true}
+                            bezier
+                            yAxisLabel=""
+                            yAxisSuffix=""
+                            chartConfig={{
+                                backgroundGradientFrom: "#1A2740",
+                                backgroundGradientTo: "#1A2740",
+                                decimalPlaces: 0,
+                                color: (opacity = 1) => `rgba(0, 230, 118, ${opacity})`,
+                                labelColor: (opacity = 1) => `rgba(220, 227, 239, ${opacity})`,
+                                propsForBackgroundLines: {
+                                    stroke: "#243654",
+                                },
+                                propsForDots: {
+                                    r: "4",
+                                    strokeWidth: "2",
+                                    stroke: "#00E676",
+                                },
+                            }}
+                            style={styles.chart}
+                        />
+
+                        <Text style={styles.swipeHint}>← Swipe right for daily status</Text>
+                    </View>
+                </ScrollView>
 
                 <View style={styles.statsGrid}>
                     <View style={styles.smallCard}>
-                        <Ionicons name="flame-outline" size={26} color="#FFB300" />
+                        <Ionicons name="flame-outline" size={24} color="#FFB300" />
                         <Text style={styles.cardValue}>{calories}</Text>
-                        <Text style={styles.cardLabel}>Calories Burned</Text>
+                        <Text style={styles.cardLabel}>Calories</Text>
                     </View>
 
                     <View style={styles.smallCard}>
-                        <Ionicons name="location-outline" size={26} color="#4FC3F7" />
+                        <Ionicons name="location-outline" size={24} color="#4FC3F7" />
                         <Text style={styles.cardValue}>{distance} km</Text>
                         <Text style={styles.cardLabel}>Distance</Text>
                     </View>
 
                     <View style={styles.smallCard}>
-                        <MaterialIcons name="timer" size={26} color="#B388FF" />
+                        <MaterialIcons name="timer" size={24} color="#B388FF" />
                         <Text style={styles.cardValue}>{activeMinutes} min</Text>
                         <Text style={styles.cardLabel}>Active Time</Text>
                     </View>
 
                     <View style={styles.smallCard}>
-                        <Ionicons name="footsteps-outline" size={26} color="#00E676" />
+                        <Ionicons name="footsteps-outline" size={24} color="#00E676" />
                         <Text style={styles.cardValue}>{stepsLeft}</Text>
-                        <Text style={styles.cardLabel}>Steps Left</Text>
+                        <Text style={styles.cardLabel}>Left</Text>
                     </View>
                 </View>
 
@@ -182,6 +322,7 @@ export default function StepsScreen() {
                     <View style={styles.modalOverlay}>
                         <View style={styles.modalBox}>
                             <Text style={styles.modalTitle}>Set Daily Goal</Text>
+
                             <TextInput
                                 style={styles.input}
                                 placeholder="Enter goal steps"
@@ -204,8 +345,6 @@ export default function StepsScreen() {
                         </View>
                     </View>
                 </Modal>
-
-
             </ScrollView>
         </SafeAreaView>
     );
@@ -229,6 +368,11 @@ const styles = StyleSheet.create({
         fontSize: 28,
         fontWeight: "800",
     },
+    subHeader: {
+        color: "#94A3B8",
+        fontSize: 13,
+        marginTop: 4,
+    },
     goalButton: {
         backgroundColor: "#1A2740",
         paddingHorizontal: 14,
@@ -242,97 +386,136 @@ const styles = StyleSheet.create({
     },
     bigCard: {
         backgroundColor: "#1A2740",
-        borderRadius: 26,
-        padding: 24,
+        borderRadius: 24,
+        padding: 20,
         alignItems: "center",
-        marginBottom: 24,
-    },
-    circleOuter: {
-        width: 210,
-        height: 210,
-        borderRadius: 105,
-        borderWidth: 12,
+        marginBottom: 16,
+        borderWidth: 1,
         borderColor: "#243654",
-        alignItems: "center",
-        justifyContent: "center",
-        marginBottom: 18,
     },
     circleInner: {
-        width: 160,
-        height: 160,
-        borderRadius: 80,
-        backgroundColor: "#0C1A32",
         alignItems: "center",
         justifyContent: "center",
     },
     stepsText: {
         color: "#FFFFFF",
-        fontSize: 34,
+        fontSize: 30,
         fontWeight: "800",
         marginTop: 8,
     },
     stepsSubText: {
         color: "#AEB9CC",
-        fontSize: 15,
+        fontSize: 14,
         marginTop: 4,
     },
     progressText: {
         color: "#FFFFFF",
         fontSize: 16,
         fontWeight: "700",
-        marginBottom: 4,
-        textAlign: "center",
+        marginTop: 14,
     },
     goalText: {
         color: "#AEB9CC",
         fontSize: 14,
-        marginBottom: 14,
-        textAlign: "center",
+        marginTop: 4,
     },
-    progressBarBg: {
-        width: "100%",
-        height: 12,
-        backgroundColor: "#0E1B32",
-        borderRadius: 20,
-        overflow: "hidden",
-    },
-    progressBarFill: {
-        height: "100%",
-        backgroundColor: "#00E676",
-        borderRadius: 20,
-    },
-    actionButtonsRow: {
+    chipsRow: {
         flexDirection: "row",
-        marginTop: 18,
-        gap: 12,
+        gap: 10,
+        marginTop: 16,
+        flexWrap: "wrap",
+        justifyContent: "center",
     },
-    actionButton: {
-        backgroundColor: "#00E676",
-        paddingVertical: 10,
-        paddingHorizontal: 18,
-        borderRadius: 14,
+    premiumChip: {
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: "#0C1A32",
+        borderRadius: 999,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        gap: 6,
     },
-    actionButtonText: {
-        color: "#03142B",
-        fontWeight: "800",
-        fontSize: 14,
+    premiumChipText: {
+        color: "#E2E8F0",
+        fontSize: 12,
+        fontWeight: "600",
     },
-    resetButton: {
-        backgroundColor: "#334155",
-        paddingVertical: 10,
-        paddingHorizontal: 18,
-        borderRadius: 14,
+    swipeWrapper: {
+        marginBottom: 16,
     },
-    resetButtonText: {
+    swipeCardsContainer: {
+        paddingRight: 0,
+    },
+    swipeCard: {
+        backgroundColor: "#1A2740",
+        borderRadius: 22,
+        padding: 18,
+        borderWidth: 1,
+        borderColor: "#243654",
+        marginRight: 0,
+        minHeight: 240,
+        justifyContent: "space-between",
+    },
+    statusTopRow: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 8,
+    },
+    statusTitle: {
         color: "#FFFFFF",
+        fontSize: 18,
+        fontWeight: "800",
+    },
+    statusPercent: {
+        color: "#00E676",
+        fontWeight: "800",
+        fontSize: 18,
+    },
+    statusMessage: {
+        color: "#E2E8F0",
+        fontSize: 15,
         fontWeight: "700",
-        fontSize: 14,
+        marginBottom: 6,
     },
-    sectionTitle: {
+    statusSub: {
+        color: "#94A3B8",
+        fontSize: 13,
+        lineHeight: 20,
+    },
+    swipeHint: {
+        color: "#64748B",
+        fontSize: 12,
+        marginTop: 16,
+        textAlign: "right",
+    },
+    weeklyHeader: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        paddingHorizontal: 2,
+        marginBottom: 6,
+    },
+    weeklyTitle: {
         color: "#FFFFFF",
-        fontSize: 22,
+        fontSize: 18,
         fontWeight: "800",
-        marginBottom: 14,
+    },
+    resetMiniBtn: {
+        backgroundColor: "#0C1A32",
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 12,
+    },
+    resetMiniText: {
+        color: "#DCE3EF",
+        fontSize: 12,
+        fontWeight: "700",
+    },
+    chart: {
+        borderRadius: 16,
+        alignSelf: "center",
+        marginTop: 6,
     },
     statsGrid: {
         flexDirection: "row",
@@ -343,21 +526,23 @@ const styles = StyleSheet.create({
     smallCard: {
         width: "48%",
         backgroundColor: "#1A2740",
-        borderRadius: 22,
-        paddingVertical: 22,
-        paddingHorizontal: 14,
+        borderRadius: 18,
+        paddingVertical: 18,
+        paddingHorizontal: 12,
         alignItems: "center",
-        marginBottom: 14,
+        marginBottom: 12,
+        borderWidth: 1,
+        borderColor: "#243654",
     },
     cardValue: {
         color: "#FFFFFF",
-        fontSize: 22,
+        fontSize: 20,
         fontWeight: "800",
         marginTop: 8,
     },
     cardLabel: {
         color: "#AEB9CC",
-        fontSize: 13,
+        fontSize: 12,
         textAlign: "center",
         marginTop: 6,
     },
