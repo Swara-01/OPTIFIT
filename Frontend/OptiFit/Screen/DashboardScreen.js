@@ -25,26 +25,6 @@ export default function DashboardScreen({ navigation, setIsLoggedIn }) {
   const [refreshing, setRefreshing] = useState(false);
   const [fadeAnim] = useState(new Animated.Value(0));
 
-  const [sleepModalVisible, setSleepModalVisible] = useState(false);
-  const [sleepHours, setSleepHours] = useState("");
-  const [sleepLogged, setSleepLogged] = useState(false);
-
-  const checkSleepStatus = async () => {
-    try {
-      const res = await api.get("/sleep/today");
-
-      if (!res.data) {
-        setSleepLogged(false);
-        setSleepModalVisible(true);
-      } else {
-        setSleepLogged(true);
-      }
-
-    } catch (error) {
-      console.log(error.response?.data || error.message);
-    }
-  };
-
   const loadDashboard = async () => {
     try {
       const res = await api.get("/dashboard");
@@ -59,7 +39,6 @@ export default function DashboardScreen({ navigation, setIsLoggedIn }) {
 
   useEffect(() => {
     loadDashboard();
-    checkSleepStatus();
   }, []);
 
   useEffect(() => {
@@ -73,26 +52,6 @@ export default function DashboardScreen({ navigation, setIsLoggedIn }) {
   const onRefresh = () => {
     setRefreshing(true);
     loadDashboard();
-  };
-
-  const handleLogout = async () => {
-    await AsyncStorage.removeItem("token");
-    setIsLoggedIn(false);
-  };
-
-  const submitSleep = async () => {
-    if (!sleepHours) return;
-    try {
-      await api.post("/sleep", {
-        sleepHours: Number(sleepHours),
-      });
-      setSleepLogged(true);
-      setSleepModalVisible(false);
-      setSleepHours("");
-      loadDashboard();
-    } catch (error) {
-      console.log(error.response?.data || error.message);
-    }
   };
 
   if (loading) {
@@ -124,42 +83,16 @@ export default function DashboardScreen({ navigation, setIsLoggedIn }) {
     calorieRemaining < 0 ? "#ef4444" : "#00E676";
 
   const hour = new Date().getHours();
+
   const greeting =
-    hour < 12 ? "Good Morning" :
-      hour < 18 ? "Good Afternoon" :
-        "Good Evening";
+    hour < 12
+      ? "Good Morning"
+      : hour < 18
+        ? "Good Afternoon"
+        : "Good Evening";
 
   return (
     <>
-      {/* Sleep Modal */}
-      <Modal visible={sleepModalVisible} transparent animationType="fade">
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-          style={styles.modalOverlay}
-        >
-          <View style={styles.modalContainer}>
-            <Text style={styles.modalTitle}>
-              How many hours did you sleep today?
-            </Text>
-
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Enter hours (e.g. 7.5)"
-              placeholderTextColor="#888"
-              keyboardType="numeric"
-              value={sleepHours}
-              onChangeText={setSleepHours}
-            />
-
-            <TouchableOpacity
-              style={styles.modalButton}
-              onPress={submitSleep}
-            >
-              <Text style={styles.modalButtonText}>Save</Text>
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
       <SafeAreaView style={{ flex: 1, backgroundColor: "#0B1220" }}>
         <ScrollView
           style={styles.container}
@@ -179,7 +112,12 @@ export default function DashboardScreen({ navigation, setIsLoggedIn }) {
                 <Text style={styles.logo}>OPTIFIT</Text>
                 <Text style={styles.greeting}>{greeting}</Text>
               </View>
-              <Ionicons name="notifications-outline" size={24} color="#fff" />
+
+              <Ionicons
+                name="notifications-outline"
+                size={24}
+                color="#fff"
+              />
             </View>
 
             <Text style={styles.sectionTitle}>Today</Text>
@@ -199,7 +137,10 @@ export default function DashboardScreen({ navigation, setIsLoggedIn }) {
                     <Text style={styles.remaining}>
                       {calorieRemaining}
                     </Text>
-                    <Text style={styles.subText}>Calories Remaining</Text>
+
+                    <Text style={styles.subText}>
+                      Calories Remaining
+                    </Text>
                   </>
                 )}
               </AnimatedCircularProgress>
@@ -224,109 +165,184 @@ export default function DashboardScreen({ navigation, setIsLoggedIn }) {
                     <Text style={styles.remainingSmall}>
                       {proteinConsumed}/{proteinTarget}
                     </Text>
-                    <Text style={styles.subText}>Protein (g)</Text>
+
+                    <Text style={styles.subText}>
+                      Protein (g)
+                    </Text>
                   </>
                 )}
               </AnimatedCircularProgress>
             </View>
 
             {/* QUICK ACTIONS */}
-            <Text style={styles.overviewTitle}>Quick Actions</Text>
+            <Text style={styles.overviewTitle}>
+              Quick Actions
+            </Text>
 
             <View style={styles.quickActions}>
-              <TouchableOpacity style={styles.quickBtn}>
-                <Ionicons name="restaurant" size={22} color="#fff" />
-                <Text style={styles.quickText}>Log Food</Text>
-              </TouchableOpacity>
 
               <TouchableOpacity style={styles.quickBtn}>
-                <Ionicons name="water" size={22} color="#fff" />
-                <Text style={styles.quickText}>Water</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.quickBtn}
-                onPress={() => navigation.navigate("Steps")}>
-                <Ionicons name="walk" size={22} color="#fff" />
-                <Text style={styles.quickText}>Steps</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.quickBtn}
-                onPress={() => {
-                  if (!sleepLogged) {
-                    setSleepModalVisible(true);
-                  }
-                }}
-              >
-                <Ionicons name="moon" size={22} color="#fff" />
+                <Ionicons
+                  name="restaurant"
+                  size={22}
+                  color="#fff"
+                />
                 <Text style={styles.quickText}>
-                  {sleepLogged ? "Logged" : "Sleep"}
+                  Log Food
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.quickBtn}>
+                <Ionicons
+                  name="water"
+                  size={22}
+                  color="#fff"
+                />
+                <Text style={styles.quickText}>
+                  Water
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.quickBtn}
+                onPress={() => navigation.navigate("Steps")}
+              >
+                <Ionicons
+                  name="walk"
+                  size={22}
+                  color="#fff"
+                />
+                <Text style={styles.quickText}>
+                  Steps
+                </Text>
+              </TouchableOpacity>
+
+              {/* FRIENDS */}
+              <TouchableOpacity
+                style={styles.quickBtn}
+                onPress={() => navigation.navigate("Friends")}
+              >
+                <Ionicons
+                  name="people"
+                  size={22}
+                  color="#fff"
+                />
+
+                <Text style={styles.quickText}>
+                  Friends
                 </Text>
               </TouchableOpacity>
 
             </View>
 
             {/* HEALTH OVERVIEW */}
-            <Text style={styles.overviewTitle}>Health Overview</Text>
+            <Text style={styles.overviewTitle}>
+              Health Overview
+            </Text>
 
             <View style={styles.overviewContainer}>
 
               <View style={styles.overviewCard}>
-                <Ionicons name="moon" size={28} color="#8b5cf6" />
+                <Ionicons
+                  name="moon"
+                  size={28}
+                  color="#8b5cf6"
+                />
+
                 <Text style={styles.overviewValue}>
                   {data?.sleep?.sleepHours || 0} hrs
                 </Text>
-                <Text style={styles.overviewLabel}>Sleep</Text>
+
+                <Text style={styles.overviewLabel}>
+                  Sleep
+                </Text>
               </View>
 
               <View style={styles.overviewCard}>
-                <Ionicons name="water" size={28} color="#06b6d4" />
+                <Ionicons
+                  name="water"
+                  size={28}
+                  color="#06b6d4"
+                />
+
                 <Text style={styles.overviewValue}>
                   {data?.water?.consumed || 0} ml
                 </Text>
-                <Text style={styles.overviewLabel}>Water</Text>
+
+                <Text style={styles.overviewLabel}>
+                  Water
+                </Text>
               </View>
 
               <View style={styles.overviewCard}>
-                <Ionicons name="walk" size={28} color="#facc15" />
+                <Ionicons
+                  name="walk"
+                  size={28}
+                  color="#facc15"
+                />
+
                 <Text style={styles.overviewValue}>
                   {data?.steps?.steps || 0}
                 </Text>
-                <Text style={styles.overviewLabel}>Steps</Text>
+
+                <Text style={styles.overviewLabel}>
+                  Steps
+                </Text>
               </View>
 
               <View style={styles.overviewCard}>
-                <Ionicons name="trending-down" size={28} color="#ef4444" />
-                <Text style={styles.overviewValue}>--</Text>
-                <Text style={styles.overviewLabel}>Sleep Debt</Text>
+                <Ionicons
+                  name="trending-down"
+                  size={28}
+                  color="#ef4444"
+                />
+
+                <Text style={styles.overviewValue}>
+                  --
+                </Text>
+
+                <Text style={styles.overviewLabel}>
+                  Sleep Debt
+                </Text>
               </View>
 
             </View>
 
             {/* RECOVERY SCORE */}
             <View style={styles.recoveryCard}>
-              <Text style={styles.recoveryTitle}>Recovery Score</Text>
+
+              <Text style={styles.recoveryTitle}>
+                Recovery Score
+              </Text>
+
               <Text style={styles.recoveryValue}>
                 {data?.recovery?.score || 75}%
               </Text>
+
               <Text style={styles.recoverySub}>
                 Based on sleep, protein & activity
               </Text>
+
             </View>
 
           </Animated.View>
         </ScrollView>
       </SafeAreaView>
+
       {/* FLOATING BUTTON */}
       <TouchableOpacity style={styles.fab}>
-        <Ionicons name="add" size={28} color="#fff" />
+        <Ionicons
+          name="add"
+          size={28}
+          color="#fff"
+        />
       </TouchableOpacity>
     </>
   );
 }
 
 const styles = StyleSheet.create({
+
   container: {
     flex: 1,
     backgroundColor: "#0B1220",
@@ -484,44 +500,4 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
 
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.7)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-  modalContainer: {
-    backgroundColor: "#1E293B",
-    padding: 25,
-    borderRadius: 20,
-    width: "85%",
-  },
-
-  modalTitle: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
-    marginBottom: 15,
-  },
-
-  modalInput: {
-    backgroundColor: "#0F172A",
-    borderRadius: 12,
-    padding: 14,
-    color: "#fff",
-    marginBottom: 15,
-  },
-
-  modalButton: {
-    backgroundColor: "#00E676",
-    padding: 14,
-    borderRadius: 12,
-    alignItems: "center",
-  },
-
-  modalButtonText: {
-    fontWeight: "bold",
-    color: "#0F172A",
-  },
 });
